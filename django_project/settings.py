@@ -9,7 +9,8 @@ https://docs.djangoproject.com/en/4.2/topics/settings/
 For the full list of settings and their values, see
 https://docs.djangoproject.com/en/4.2/ref/settings/
 """
-
+import json
+from urllib import request
 from pathlib import Path
 import os
 
@@ -80,12 +81,14 @@ WSGI_APPLICATION = 'django_project.wsgi.application'
 
 DATABASES = {
     'default': {
+        ## For RDS connection:
         'ENGINE': 'django.db.backends.mysql',
         'NAME': '<database name>',
         'USER': 'admin',
         'PASSWORD': '<Your-password-here>',
         'HOST': '<database name>.<something something 12341234>.<region>.rds.amazonaws.com',
         'PORT': '3306',  # Default port for MySQL
+        ## For local SQLite connection:
         # 'ENGINE': 'django.db.backends.sqlite3',
         # 'NAME': BASE_DIR / 'db.sqlite3',
     }
@@ -110,6 +113,49 @@ AUTH_PASSWORD_VALIDATORS = [
     },
 ]
 
+AUTHENTICATION_BACKENDS = [
+    'django_cognito_jwt.backend.JWTBackend',
+    'django.contrib.auth.backends.ModelBackend',
+]
+
+COGNITO_USER_POOL = '<your pool>'
+COGNITO_AWS_REGION = '<your region>'
+# Provide this value if `id_token` is used for authentication (it contains 'aud' claim).
+# `access_token` doesn't have it, in this case keep the COGNITO_AUDIENCE empty
+COGNITO_AUDIENCE = '<insert yours>'
+
+COGNITO_POOL_URL = None  # will be set few lines of code later, if configuration provided
+
+rsa_keys = {}
+# To avoid circular imports, we keep this logic here.
+# On django init we download jwks public keys which are used to validate jwt tokens.
+# For now there is no rotation of keys (seems like in Cognito decided not to implement it)
+if COGNITO_AWS_REGION and COGNITO_USER_POOL:
+    COGNITO_POOL_URL = 'https://cognito-idp.{}.amazonaws.com/{}'.format(COGNITO_AWS_REGION, COGNITO_USER_POOL)
+    pool_jwks_url = COGNITO_POOL_URL + '/.well-known/jwks.json'
+    jwks = json.loads(request.urlopen(pool_jwks_url).read())
+    rsa_keys = {key['kid']: json.dumps(key) for key in jwks['keys']}
+
+
+JWT_AUTH = {
+    'JWT_PAYLOAD_GET_USERNAME_HANDLER': 'core.api.jwt.get_username_from_payload_handler',
+    'JWT_DECODE_HANDLER': 'core.api.jwt.cognito_jwt_decode_handler',
+    'JWT_PUBLIC_KEY': rsa_keys,
+    'JWT_ALGORITHM': 'RS256',
+    'JWT_AUDIENCE': COGNITO_AUDIENCE,
+    'JWT_ISSUER': COGNITO_POOL_URL,
+    'JWT_AUTH_HEADER_PREFIX': 'Bearer',
+}
+
+# Add the Cognito JWT Authentication backend
+REST_FRAMEWORK = {
+    'DEFAULT_AUTHENTICATION_CLASSES': (
+        'django_cognito_jwt.JSONWebTokenAuthentication',
+    ),
+}
+
+COGNITO_USER_MODEL = "front_end.CustomUser"
+AUTH_USER_MODEL = "front_end.CustomUser"
 
 # Internationalization
 # https://docs.djangoproject.com/en/4.2/topics/i18n/
