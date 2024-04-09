@@ -36,28 +36,34 @@ class TokenPresent(BasePermission):
 
 class JournalEntryViewSet(viewsets.ModelViewSet):
     serializer_class = JournalEntrySerializer
-    # Use custom permission class or remove it entirely if not needed
     permission_classes = [TokenPresent]
 
     def get_queryset(self):
-        # Get the user ID from a custom header or part of the request
         user_id = self.request.headers.get('X-User-ID')
         return JournalEntry.objects.filter(user_id=user_id)
 
     def perform_create(self, serializer):
-        # Get the user ID from the request data and save it with the journal entry
         user_id = self.request.data.get('user_id')
         serializer.save(user_id=user_id)
 
-    # No need to override `create` and `update` methods if they don't have specific logic other than calling `perform_create` and `perform_update`
 
     def update(self, request, *args, **kwargs):
         partial = kwargs.pop('partial', False)
         instance = self.get_object()
 
-        # Ensure the instance user_id matches the one in the request data or headers
         request_user_id = request.data.get('user_id') or request.headers.get('X-User-ID')
         if instance.user_id != request_user_id:
             return Response({"detail": "You do not have permission to update this entry."}, status=status.HTTP_403_FORBIDDEN)
 
         return super(JournalEntryViewSet, self).update(request, *args, **kwargs)
+
+    def destroy(self, request, *args, **kwargs):
+        if 'Authorization' not in request.headers:
+            return Response({'detail': 'Authorization header is missing'}, status=status.HTTP_401_UNAUTHORIZED)
+        request_user_id = request.headers.get('X-User-ID')
+        instance = self.get_object()
+        if instance.user_id != request_user_id:
+            raise PermissionDenied({'detail': 'You do not have permission to delete this entry.'})
+
+        response = super(JournalEntryViewSet, self).destroy(request, *args, **kwargs)
+        return response
